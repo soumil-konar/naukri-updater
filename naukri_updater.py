@@ -1,15 +1,29 @@
 import time
 import os
+import gzip
+import base64
 from playwright.sync_api import sync_playwright
 
 AUTH_FILE = "naukri_auth.json"
 
-def refresh_naukri_profile():
-    # If NAUKRI_AUTH_JSON secret/env is provided and file doesn't exist, create it
+def restore_auth_file():
+    """Restores naukri_auth.json from NAUKRI_AUTH_JSON secret (supports raw JSON or base64+gzip)."""
     if not os.path.exists(AUTH_FILE) and os.environ.get("NAUKRI_AUTH_JSON"):
-        print("[+] Creating session state file from NAUKRI_AUTH_JSON environment variable...")
-        with open(AUTH_FILE, "w", encoding="utf-8") as f:
-            f.write(os.environ.get("NAUKRI_AUTH_JSON"))
+        auth_data = os.environ.get("NAUKRI_AUTH_JSON").strip()
+        try:
+            # Try decompressing base64+gzipped payload first
+            decompressed = gzip.decompress(base64.b64decode(auth_data)).decode("utf-8")
+            with open(AUTH_FILE, "w", encoding="utf-8") as f:
+                f.write(decompressed)
+            print("[+] Session state restored from compressed secret.")
+        except Exception:
+            # Fall back to raw JSON string
+            with open(AUTH_FILE, "w", encoding="utf-8") as f:
+                f.write(auth_data)
+            print("[+] Session state restored from raw JSON secret.")
+
+def refresh_naukri_profile():
+    restore_auth_file()
 
     if not os.path.exists(AUTH_FILE):
         print(f"[!] Error: '{AUTH_FILE}' not found. Please run 'python save_session.py' locally or set NAUKRI_AUTH_JSON secret.")
@@ -39,7 +53,7 @@ def refresh_naukri_profile():
         print("[+] Navigating directly to profile page...")
         page.goto("https://www.naukri.com/mnjuser/profile", wait_until="domcontentloaded", timeout=60000)
 
-        # Give it a moment to load dynamic scripts
+        # Wait for dynamic components to settle
         page.wait_for_timeout(3000)
 
         if "login" in page.url:
