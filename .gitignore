@@ -6,6 +6,8 @@ env/
 # Sensitive Session & Credentials
 naukri_auth.json
 .env
+secret_for_github.txt
+*.secret
 
 # Python Cache
 __pycache__/

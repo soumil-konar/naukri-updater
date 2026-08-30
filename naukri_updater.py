@@ -2,25 +2,68 @@ import time
 import os
 import gzip
 import base64
+import json
 from playwright.sync_api import sync_playwright
 
 AUTH_FILE = "naukri_auth.json"
 
-def restore_auth_file():
-    """Restores naukri_auth.json from NAUKRI_AUTH_JSON secret (supports raw JSON or base64+gzip)."""
-    if not os.path.exists(AUTH_FILE) and os.environ.get("NAUKRI_AUTH_JSON"):
-        auth_data = os.environ.get("NAUKRI_AUTH_JSON").strip()
+def parse_and_validate_auth(raw_input: str) -> str:
+    """Extracts valid JSON session data from either raw JSON or base64+gzip compressed text."""
+    cleaned = raw_input.strip()
+
+    # 1. Direct JSON check
+    if cleaned.startswith("{") and cleaned.endswith("}"):
         try:
-            # Try decompressing base64+gzipped payload first
-            decompressed = gzip.decompress(base64.b64decode(auth_data)).decode("utf-8")
-            with open(AUTH_FILE, "w", encoding="utf-8") as f:
-                f.write(decompressed)
-            print("[+] Session state restored from compressed secret.")
+            data = json.loads(cleaned)
+            if "cookies" in data:
+                return cleaned
         except Exception:
-            # Fall back to raw JSON string
+            pass
+
+    # 2. Filter out possible accidental banners/headers from console logs
+    lines = cleaned.splitlines()
+    candidate_lines = [
+        l.strip() for l in lines 
+        if l.strip() and not l.strip().startswith(("=", "👉", "[", "#", "COPY", "Original", "-"))
+    ]
+    candidate = "".join(candidate_lines)
+
+    # Try base64 decompress on cleaned candidate
+    try:
+        decompressed = gzip.decompress(base64.b64decode(candidate)).decode("utf-8")
+        data = json.loads(decompressed)
+        if "cookies" in data:
+            return decompressed
+    except Exception:
+        pass
+
+    # Try candidate directly without line filtering
+    try:
+        decompressed = gzip.decompress(base64.b64decode(cleaned)).decode("utf-8")
+        data = json.loads(decompressed)
+        if "cookies" in data:
+            return decompressed
+    except Exception:
+        pass
+
+    raise ValueError(
+        "Could not parse NAUKRI_AUTH_JSON as valid JSON or compressed session state. "
+        "Please re-run 'python export_secret.py' and copy the clean secret value."
+    )
+
+def restore_auth_file():
+    """Restores naukri_auth.json from NAUKRI_AUTH_JSON secret."""
+    if not os.path.exists(AUTH_FILE) and os.environ.get("NAUKRI_AUTH_JSON"):
+        auth_env = os.environ.get("NAUKRI_AUTH_JSON")
+        print("[+] Processing NAUKRI_AUTH_JSON environment variable...")
+        try:
+            valid_json = parse_and_validate_auth(auth_env)
             with open(AUTH_FILE, "w", encoding="utf-8") as f:
-                f.write(auth_data)
-            print("[+] Session state restored from raw JSON secret.")
+                f.write(valid_json)
+            print(f"[✓] Session state successfully restored ({len(valid_json)} bytes).")
+        except Exception as e:
+            print(f"[!] Auth decode error: {e}")
+            raise
 
 def refresh_naukri_profile():
     restore_auth_file()
