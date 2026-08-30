@@ -72,9 +72,9 @@ def refresh_naukri_profile():
         print(f"[!] Error: '{AUTH_FILE}' not found. Please run 'python save_session.py' locally or set NAUKRI_AUTH_JSON secret.")
         return
 
-    # Check headless mode: defaults to True for CI / server environments
-    headless_env = os.environ.get("HEADLESS", "true").strip().lower()
-    is_headless = headless_env not in ["false", "0", "no"]
+    # In CI/GitHub Actions, we run with xvfb-run in headed mode to avoid Akamai anti-bot blocks
+    headless_env = os.environ.get("HEADLESS", "false").strip().lower()
+    is_headless = headless_env in ["true", "1", "yes"]
 
     print(f"[+] Starting Playwright (Headless: {is_headless})...")
     with sync_playwright() as p:
@@ -83,14 +83,26 @@ def refresh_naukri_profile():
             args=[
                 "--disable-blink-features=AutomationControlled",
                 "--no-sandbox",
-                "--disable-dev-shm-usage"
+                "--disable-dev-shm-usage",
+                "--disable-infobars"
             ]
         )
         context = browser.new_context(
             storage_state=AUTH_FILE,
             user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
-            viewport={"width": 1280, "height": 800}
+            viewport={"width": 1366, "height": 768},
+            locale="en-US",
+            timezone_id="Asia/Kolkata"
         )
+        
+        # Hide automation flags
+        context.add_init_script("""
+            Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+            window.navigator.chrome = { runtime: {} };
+            Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+            Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+        """)
+
         page = context.new_page()
 
         print("[+] Navigating directly to profile page...")
@@ -99,13 +111,18 @@ def refresh_naukri_profile():
         # Wait for dynamic components to settle
         page.wait_for_timeout(3000)
 
+        if "Access Denied" in page.title():
+            print("[!] Access Denied by anti-bot. Please ensure xvfb-run and headed mode are used.")
+            browser.close()
+            return
+
         if "login" in page.url:
             print("[!] Session expired or login required. Please re-run 'python save_session.py' and update your GitHub secret.")
             browser.close()
             return
 
         print("[+] Session active. Locating Resume Headline section...")
-        page.wait_for_selector("div.resumeHeadline", timeout=15000)
+        page.wait_for_selector("div.resumeHeadline", timeout=20000)
         headline_card = page.locator("div.resumeHeadline")
         edit_button = headline_card.locator("span.edit.icon").first
         edit_button.click()

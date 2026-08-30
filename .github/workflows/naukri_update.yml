@@ -30,9 +30,9 @@ jobs:
         run: |
           playwright install chromium --with-deps
 
-      - name: Run Naukri Profile Updater
+      - name: Run Naukri Profile Updater (Virtual Display)
         env:
           NAUKRI_AUTH_JSON: ${{ secrets.NAUKRI_AUTH_JSON }}
-          HEADLESS: "true"
+          HEADLESS: "false"
         run: |
-          python naukri_updater.py
+          xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24" python naukri_updater.py
